@@ -26,20 +26,20 @@ def error_code_message(response):
     ))
 
 
-def verify_trans(trans_id):
-    url = "https://pay.ir/payment/verify"
+def verify_trans(token):
+    url = "https://pay.ir/pg/verify"
     data = {
         "api": settings.PAY_IR_CONFIG.get("api_key"),
-        "transId": trans_id
+        "token": token,
     }
     headers = {"Content-Type": "application/json", }
     resp = requests.post(url, data=json.dumps(data), headers=headers)
+    print(resp)
     return resp.json()
 
 
 def index(request):
     """ First page of app. """
-
     return render(request, "index.html")
 
 
@@ -49,7 +49,7 @@ def req(request):
     if request.method == "POST":
         if request.POST.get('amount') is None:
             return HttpResponseBadRequest('Amount is required.')
-        url = "https://pay.ir/payment/send"
+        url = "https://pay.ir/pg/send"
         fullname = request.POST.get('fullname')
         headers = {
             "Content-Type": "application/json",
@@ -57,24 +57,29 @@ def req(request):
         data_dict = {
             "api": settings.PAY_IR_CONFIG.get("api_key"),
             "amount": int(request.POST.get('amount')),
-            "redirect": request.scheme+"://"+request.get_host()+reverse('verify'),
+            "redirect": request.scheme + "://" + request.get_host() + reverse('verify'),
             "mobile": request.POST.get('mobile'),
-            "description": request.POST.get('description')
+            "factorNumber": request.POST.get("factorNumber"),
+            "description": request.POST.get('description'),
+            "transaction": request.POST.get('transaction'),
         }
+        print(data_dict)
 
         request_api = requests.post(
             url, data=json.dumps(data_dict), headers=headers
         )
         response = request_api.json()
         if response["status"] == 1:
-            trans_id = response["transId"]
+            token = response["token"]
             db = Payment(full_name=fullname, amount=data_dict["amount"],
                          mobile=data_dict["mobile"],
                          description=data_dict["description"],
-                         transid=int(trans_id)
+                         token=token,
+                         transid=data_dict["transaction"]
                          )
             db.save()
-            return redirect("https://pay.ir/payment/gateway/{}".format(str(trans_id)))
+            print("https://pay.ir/pg/{}".format(str(token)))
+            return redirect("https://pay.ir/pg/{}".format(str(token)))
         else:
             return error_code_message(response)
         return HttpResponse(content=redirect)
@@ -85,29 +90,32 @@ def req(request):
 
 @csrf_exempt
 def verfication(request):
-
-    if request.method == "POST":
-        status_code = int(request.POST.get("status"))
-        trans_id = request.POST.get("transId")
-        message = request.POST.get("message")
+    print(request)
+    if request.method == "GET":
+        status_code = int(request.GET.get("status"))
+        token = request.GET.get("token")
         if status_code == 1:
-            card_number = request.POST.get("cardNumber")
-            trace_number = request.POST.get("traceNumber")
+            message = request.GET.get("message")
+
         else:
             data = {"message": message}
             return render(request, "fail.html", data)
-        verify = verify_trans(trans_id)
+        verify = verify_trans(token)
         if verify["status"] == 1:
-            data_query = Payment.objects.get(transid=trans_id)
+            data_query = Payment.objects.filter(token=token).order_by('-id')[0]
             if data_query.status == 0 and data_query.amount == int(verify["amount"]):
                 data_query.status = 1
-                data_query.card_number = card_number
-                data_query.trace_number = trace_number
+                data_query.card_number = verify["cardNumber"]
+                data_query.trace_number = verify["traceNumber"]
                 data_query.message = message
                 data_query.save()
                 data = {
-                    "trace_number": trace_number,
-                    "amount": verify["amount"]
+                    "amount": verify["amount"],
+                    "factor_number": verify["factorNumber"],
+                    "mobile": verify["mobile"],
+                    "description" : verify["description"],
+                    "card_number" : verify["cardNumber"],
+                    "trace_number" : verify["traceNumber"],
                 }
                 return render(request, "success.html", data)
             else:
