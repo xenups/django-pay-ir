@@ -15,6 +15,7 @@ class Payment(models.Model):
     mobile = models.CharField(
         verbose_name="شماره موبایل", max_length=11, blank=True, null=True
     )
+    token = models.CharField(max_length=20,verbose_name="token",blank=False,null=False)
     description = models.CharField(
         verbose_name="توضیحات", max_length=255, blank=True, null=True
     )
